@@ -13,6 +13,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from app.core.database import Base
+from app.models.product_decision import ProductDecision  # se você centraliza imports, ajuste conforme seu padrão
 
 
 class Product(Base):
@@ -23,6 +24,7 @@ class Product(Base):
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     category = Column(String(100), nullable=True)  # ex.: "PET", "Casa e cozinha"
+    decisions = relationship("ProductDecision", back_populates="product", cascade="all, delete-orphan")
 
     reference_marketplace_url = Column(String(500), nullable=True)
     supplier_url = Column(String(500), nullable=True)

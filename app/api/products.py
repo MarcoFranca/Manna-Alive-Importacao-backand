@@ -14,6 +14,10 @@ from app.schemas.simulation import SimulationInput, SimulationOut
 from app.schemas.market_data import MarketDataCreate, MarketDataOut
 from app.schemas.score import ProductScoreOut
 from app.services.scoring import compute_product_score
+from app.schemas.evaluation import ProductEvaluationResponse
+from app.services.evaluation import compute_product_evaluation
+from app.models.product_decision import ProductDecision
+from app.schemas.decision import ProductDecisionCreate, ProductDecisionOut
 
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -398,3 +402,55 @@ def get_last_simulation(product_id: int, db: Session = Depends(get_db)):
         )
 
     return last_sim
+
+
+@router.get("/{product_id}/evaluation", response_model=ProductEvaluationResponse)
+def get_product_evaluation(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    try:
+        return compute_product_evaluation(db, product_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/{product_id}/decisions", response_model=ProductDecisionOut)
+def create_product_decision(
+    product_id: int,
+    payload: ProductDecisionCreate,
+    db: Session = Depends(get_db),
+):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    decision = ProductDecision(
+        product_id=product_id,
+        decision=payload.decision,
+        reason=payload.reason.strip(),
+        decided_by=payload.decided_by.strip() if payload.decided_by else None,
+    )
+    db.add(decision)
+    db.commit()
+    db.refresh(decision)
+    return decision
+
+
+@router.get("/{product_id}/decisions/last", response_model=ProductDecisionOut)
+def get_last_product_decision(product_id: int, db: Session = Depends(get_db)):
+    product = db.query(Product).filter(Product.id == product_id).first()
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    decision = (
+        db.query(ProductDecision)
+        .filter(ProductDecision.product_id == product_id)
+        .order_by(ProductDecision.created_at.desc())
+        .first()
+    )
+    if not decision:
+        raise HTTPException(status_code=404, detail="No decision found for product")
+
+    return decision
