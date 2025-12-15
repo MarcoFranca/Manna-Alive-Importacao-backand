@@ -18,6 +18,8 @@ from app.schemas.evaluation import ProductEvaluationResponse
 from app.services.evaluation import compute_product_evaluation
 from app.models.product_decision import ProductDecision
 from app.schemas.decision import ProductDecisionCreate, ProductDecisionOut
+from app.schemas.triage import ProductTriageOut
+from app.services.triage import build_products_triage
 
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -30,6 +32,36 @@ def list_products(db: Session = Depends(get_db)):
     """
     products = db.query(Product).order_by(Product.id.desc()).all()
     return products
+
+
+@router.get(
+    "/triage",
+    response_model=List[ProductTriageOut],
+)
+def get_products_triage(
+    limit: int = 200,
+    include_score: bool = True,
+    include_notes: bool = False,
+    db: Session = Depends(get_db),
+):
+    """Retorna uma visão agregada de TRIAGEM para o front.
+
+    Objetivo: permitir que a tela de produtos responda rapidamente:
+    - qual produto avaliar primeiro
+    - o que está faltando (custos, mercado, simulação)
+    - alertas de risco (marca, peso, fragilidade, NCM)
+
+    Parâmetros:
+    - limit: quantos produtos retornar
+    - include_score: inclui score/classificação (mais caro)
+    - include_notes: inclui notas de score (texto grande; útil para debug)
+    """
+    return build_products_triage(
+        db,
+        limit=limit,
+        include_score=include_score,
+        include_notes=include_notes,
+    )
 
 
 @router.post("/", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
