@@ -2,7 +2,7 @@
 
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -13,6 +13,7 @@ from app.schemas.product import ProductCreate, ProductOut, ProductUpdate
 from app.schemas.simulation import SimulationInput, SimulationOut
 from app.schemas.market_data import MarketDataCreate, MarketDataOut
 from app.schemas.score import ProductScoreOut
+from app.services.exchange import fetch_usd_brl_rate
 from app.services.scoring import compute_product_score
 from app.schemas.evaluation import ProductEvaluationResponse
 from app.services.evaluation import compute_product_evaluation
@@ -20,6 +21,7 @@ from app.models.product_decision import ProductDecision
 from app.schemas.decision import ProductDecisionCreate, ProductDecisionOut
 from app.schemas.triage import ProductTriageOut
 from app.services.triage import build_products_triage
+from app.core.database import get_db
 
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -34,34 +36,25 @@ def list_products(db: Session = Depends(get_db)):
     return products
 
 
-@router.get(
-    "/triage",
-    response_model=List[ProductTriageOut],
-)
+@router.get("/triage", response_model=List[ProductTriageOut])
 def get_products_triage(
-    limit: int = 200,
-    include_score: bool = True,
-    include_notes: bool = False,
+    limit: int = Query(default=250, ge=1, le=500),
+    include_score: bool = Query(default=True),
+    include_notes: bool = Query(default=False),
     db: Session = Depends(get_db),
-):
-    """Retorna uma visão agregada de TRIAGEM para o front.
-
-    Objetivo: permitir que a tela de produtos responda rapidamente:
-    - qual produto avaliar primeiro
-    - o que está faltando (custos, mercado, simulação)
-    - alertas de risco (marca, peso, fragilidade, NCM)
-
-    Parâmetros:
-    - limit: quantos produtos retornar
-    - include_score: inclui score/classificação (mais caro)
-    - include_notes: inclui notas de score (texto grande; útil para debug)
-    """
-    return build_products_triage(
-        db,
-        limit=limit,
-        include_score=include_score,
-        include_notes=include_notes,
-    )
+) -> List[ProductTriageOut]:
+    try:
+        items = build_products_triage(
+            db,
+            limit=limit,
+            include_score=include_score,
+            include_notes=include_notes,
+        )
+        # blindagem: NUNCA deixa retornar None
+        return items or []
+    except Exception as e:
+        # aqui você quer ver o erro de verdade, não mascarar com None
+        raise HTTPException(status_code=500, detail=f"Failed to build triage: {e}")
 
 
 @router.post("/", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
@@ -117,36 +110,31 @@ def create_product(payload: ProductCreate, db: Session = Depends(get_db)):
     response_model=SimulationOut,
     status_code=status.HTTP_201_CREATED,
 )
-def simulate_import_for_product(
+async def simulate_import_for_product(   # <-- agora async
     product_id: int,
     payload: SimulationInput,
     db: Session = Depends(get_db),
 ):
-    """
-    Simula uma importação para um produto específico usando a regra rápida:
-    - custo aduaneiro = (FOB + frete + seguro) * quantidade
-    - custo total ≈ custo aduaneiro * 2 (aéreo / simplificada)
-    - converte para BRL, calcula custo unitário e margem
-    """
-
-    # 1) Buscar o produto no banco
     product = db.query(Product).filter(Product.id == product_id).first()
     if not product:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Produto não encontrado.",
-        )
+        raise HTTPException(status_code=404, detail="Produto não encontrado.")
 
     if product.fob_price_usd is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Produto não possui FOB definido.",
-        )
+        raise HTTPException(status_code=400, detail="Produto não possui FOB definido.")
 
-    # 2) Calcular totais em USD
     quantity = payload.quantity
-    exchange_rate = payload.exchange_rate
     target_price = payload.target_sale_price_brl
+
+    # ✅ câmbio: se não veio no payload, pega do dia
+    exchange_rate = payload.exchange_rate
+    if exchange_rate is None:
+        try:
+            exchange_rate = await fetch_usd_brl_rate()
+        except Exception as e:
+            raise HTTPException(
+                status_code=502,
+                detail=f"Falha ao buscar dólar do dia: {e}",
+            )
 
     # FOB total (produto * quantidade)
     fob_total_usd = product.fob_price_usd * quantity

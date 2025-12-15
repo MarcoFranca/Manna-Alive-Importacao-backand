@@ -75,6 +75,21 @@ class ScenarioResult(BaseModel):
     unit_cost_brl: float
 
     target_sale_price_brl: float
+
+    # 🔥 NOVO — Receita líquida
+    net_sale_price_brl: float
+
+    # 🔥 NOVO — Lucro
+    profit_unit_brl: float
+    profit_total_brl: float
+
+    # 🔥 NOVO — ROI
+    roi_unit_pct: float
+    roi_total_pct: float
+
+    # 🔥 NOVO — Payback
+    payback_days: Optional[float] = None
+
     estimated_margin_pct: float
 
     approved: bool

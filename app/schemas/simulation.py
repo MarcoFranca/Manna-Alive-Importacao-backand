@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 class SimulationInput(BaseModel):
     quantity: int
-    exchange_rate: Decimal
+    exchange_rate: Optional[Decimal] = None  # <-- AGORA opcional
     target_sale_price_brl: Decimal
 
     freight_total_usd: Optional[Decimal] = None

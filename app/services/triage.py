@@ -5,6 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
 
+from app.models.product_decision import ProductDecision
+from app.schemas.decision import ProductDecisionOut
+
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session, selectinload
 
@@ -107,6 +110,31 @@ def _get_market_map(db: Session) -> Dict[int, ProductMarketData]:
     rows = db.query(ProductMarketData).all()
     return {r.product_id: r for r in rows}
 
+def _get_latest_decisions(db: Session) -> Dict[int, ProductDecision]:
+    """Map product_id -> última decisão (por created_at), evitando N+1."""
+    subq = (
+        db.query(
+            ProductDecision.product_id.label("product_id"),
+            func.max(ProductDecision.created_at).label("max_created"),
+        )
+        .group_by(ProductDecision.product_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(ProductDecision)
+        .join(
+            subq,
+            and_(
+                ProductDecision.product_id == subq.c.product_id,
+                ProductDecision.created_at == subq.c.max_created,
+            ),
+        )
+        .all()
+    )
+
+    return {r.product_id: r for r in rows}
+
 
 def build_products_triage(
     db: Session,
@@ -131,6 +159,7 @@ def build_products_triage(
 
     last_sim_map = _get_last_simulations(db)
     market_map = _get_market_map(db)
+    decision_map = _get_latest_decisions(db)
 
     out: List[ProductTriageOut] = []
 
@@ -181,6 +210,10 @@ def build_products_triage(
                 )
             except Exception:
                 score_out = None
+        last_decision = decision_map.get(p.id)
+        latest_decision_out: Optional[ProductDecisionOut] = (
+            ProductDecisionOut.model_validate(last_decision) if last_decision else None
+        )
 
         out.append(
             ProductTriageOut(
@@ -199,15 +232,35 @@ def build_products_triage(
                 next_action=next_action,
                 priority_rank=priority_rank,
                 last_simulation=last_sim_out,
+                latest_decision=latest_decision_out,
                 score=score_out,
                 alerts=alerts,
             )
         )
 
     # Ordenação estratégica: prioridade + score + mais recente
+    def _decision_rank(x: ProductTriageOut) -> int:
+        if x.latest_decision is None:
+            return 0
+        d = x.latest_decision.decision
+        if d == "needs_data":
+            return 1
+        if d == "approve_test":
+            return 2
+        if d == "approve_import":
+            return 3
+        if d == "reject":
+            return 9
+        return 5
+
     def _sort_key(x: ProductTriageOut):
         score = x.score.total_score if x.score else -1
-        return (x.priority_rank, -score, -(x.created_at.timestamp() if x.created_at else 0))
+        return (
+            _decision_rank(x),
+            x.priority_rank,
+            -score,
+            -(x.created_at.timestamp() if x.created_at else 0),
+        )
 
     out.sort(key=_sort_key)
     return out

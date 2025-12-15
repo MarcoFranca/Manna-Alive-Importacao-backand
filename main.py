@@ -13,6 +13,7 @@ from app.models.product_evaluation import ProductEvaluation  # noqa: F401
 from app.models.import_simulation import ImportSimulation  # noqa: F401
 from app.models.import_operation import ImportOperation  # noqa: F401
 
+from app.api.product_decisions import router as product_decisions_router
 from app.api.products import router as products_router
 
 app = FastAPI(
@@ -40,6 +41,7 @@ def on_startup():
 
 
 app.include_router(products_router)
+app.include_router(product_decisions_router)
 
 
 @app.get("/health")

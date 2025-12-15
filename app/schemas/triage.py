@@ -8,12 +8,14 @@ from typing import List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict
 
+from app.schemas.decision import ProductDecisionOut
+
 
 TriageStatus = Literal[
-    "ready",            # tem custo mínimo + mercado + simulação (ideal)
-    "needs_simulation", # tem custo mínimo + mercado, mas falta simulação
-    "needs_market",     # tem custo mínimo, mas falta mercado
-    "needs_costs",      # falta FOB e/ou frete
+    "ready",
+    "needs_simulation",
+    "needs_market",
+    "needs_costs",
 ]
 
 
@@ -38,7 +40,6 @@ class ScoreSummaryOut(BaseModel):
     margin_score: int
     risk_score: int
 
-    # dados de apoio (opcionais)
     sales_per_day: Optional[int] = None
     sales_per_month: Optional[int] = None
     visits: Optional[int] = None
@@ -48,10 +49,7 @@ class ScoreSummaryOut(BaseModel):
     estimated_margin_pct: Optional[Decimal] = None
     has_latest_simulation: bool = False
 
-    # NOVO: bullets curtos para UI
     reasons: List[str] = []
-
-    # opcional/debug
     notes: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=False)
@@ -63,12 +61,10 @@ class ProductTriageOut(BaseModel):
     category: Optional[str] = None
     created_at: datetime
 
-    # custo mínimo
     fob_price_usd: Optional[Decimal] = None
     freight_usd: Optional[Decimal] = None
     insurance_usd: Optional[Decimal] = None
 
-    # prontidão
     has_fob: bool
     has_freight: bool
     has_market_data: bool
@@ -78,11 +74,12 @@ class ProductTriageOut(BaseModel):
     next_action: str
     priority_rank: int
 
-    # dados agregados
     last_simulation: Optional[SimulationSummaryOut] = None
     score: Optional[ScoreSummaryOut] = None
 
-    # “atenções” (para UX)
+    # NOVO: última decisão registrada
+    latest_decision: Optional[ProductDecisionOut] = None
+
     alerts: List[str] = []
 
     model_config = ConfigDict(from_attributes=False)

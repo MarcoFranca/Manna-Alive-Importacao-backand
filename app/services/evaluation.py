@@ -28,6 +28,11 @@ class EvalConfig:
     min_margin_pct_conservative: float = 35.0
     max_customs_value_usd: float = 3000.0
 
+    # 🔥 NOVO — parâmetros financeiros
+    ml_fee_pct: float = 0.16        # comissão ML
+    ads_pct: float = 0.05           # ads médio
+    local_cost_brl: float = 3.0     # embalagem / perdas / etc por unidade
+
 
 def _safe_float(value) -> Optional[float]:
     if value is None:
@@ -73,14 +78,35 @@ def _scenario_calc(
     freight_total_usd: float,
     insurance_total_usd: float,
     config: EvalConfig,
+    sales_per_day: Optional[float] = None,
 ) -> ScenarioResult:
     fob_total_usd = fob_unit_usd * float(quantity)
     customs_value_usd = fob_total_usd + freight_total_usd + insurance_total_usd
-    estimated_total_cost_usd = _estimate_total_cost_usd(customs_value_usd)
+
+    estimated_total_cost_usd = customs_value_usd * 2.0
     estimated_total_cost_brl = estimated_total_cost_usd * exchange_rate
     unit_cost_brl = estimated_total_cost_brl / float(quantity)
 
-    # margem sobre preço de venda alvo
+    # 🔥 Receita líquida
+    total_fee_pct = config.ml_fee_pct + config.ads_pct
+    net_sale_price_brl = target_sale_price_brl * (1 - total_fee_pct)
+
+    # 🔥 Lucro
+    profit_unit_brl = net_sale_price_brl - unit_cost_brl - config.local_cost_brl
+    profit_total_brl = profit_unit_brl * quantity
+
+    # 🔥 ROI
+    capital_total_brl = unit_cost_brl * quantity
+    roi_unit_pct = (profit_unit_brl / unit_cost_brl * 100) if unit_cost_brl > 0 else -100.0
+    roi_total_pct = (profit_total_brl / capital_total_brl * 100) if capital_total_brl > 0 else -100.0
+
+    # 🔥 Payback
+    payback_days = None
+    if sales_per_day and sales_per_day > 0 and profit_unit_brl > 0:
+        daily_profit = sales_per_day * profit_unit_brl
+        payback_days = capital_total_brl / daily_profit
+
+    # Margem clássica (mantida)
     if target_sale_price_brl <= 0:
         margin_pct = -100.0
     else:
@@ -88,15 +114,16 @@ def _scenario_calc(
 
     approved = True
     reason = None
+
     if customs_value_usd > config.max_customs_value_usd:
         approved = False
-        reason = f"Valor aduaneiro estimado acima de {config.max_customs_value_usd:.0f} USD."
+        reason = f"Valor aduaneiro acima de {config.max_customs_value_usd:.0f} USD."
     elif kind == "conservative" and margin_pct < config.min_margin_pct_conservative:
         approved = False
-        reason = f"Margem abaixo de {config.min_margin_pct_conservative:.0f}% no cenário conservador."
+        reason = f"Margem abaixo de {config.min_margin_pct_conservative:.0f}% no conservador."
 
     return ScenarioResult(
-        kind=kind,  # type: ignore[arg-type]
+        kind=kind,
         name=name,
         quantity=quantity,
         exchange_rate=exchange_rate,
@@ -108,6 +135,12 @@ def _scenario_calc(
         estimated_total_cost_brl=round(estimated_total_cost_brl, 2),
         unit_cost_brl=round(unit_cost_brl, 2),
         target_sale_price_brl=round(target_sale_price_brl, 2),
+        net_sale_price_brl=round(net_sale_price_brl, 2),
+        profit_unit_brl=round(profit_unit_brl, 2),
+        profit_total_brl=round(profit_total_brl, 2),
+        roi_unit_pct=round(roi_unit_pct, 2),
+        roi_total_pct=round(roi_total_pct, 2),
+        payback_days=round(payback_days, 1) if payback_days else None,
         estimated_margin_pct=round(margin_pct, 2),
         approved=approved,
         reason=reason,
@@ -166,6 +199,7 @@ def compute_product_evaluation(db: Session, product_id: int) -> ProductEvaluatio
     # Totais de frete/seguro por cenário (simples e transparente)
     base_freight_total = freight_unit * base_qty if freight_unit > 0 else 80.0
     base_ins_total = insurance_unit * base_qty if insurance_unit > 0 else 10.0
+    sales_per_day = _safe_float(market.sales_per_day) if market else None
 
     scenarios = [
         _scenario_calc(
@@ -178,6 +212,7 @@ def compute_product_evaluation(db: Session, product_id: int) -> ProductEvaluatio
             freight_total_usd=base_freight_total,
             insurance_total_usd=base_ins_total,
             config=config,
+            sales_per_day=sales_per_day,
         ),
         _scenario_calc(
             kind="conservative",
@@ -189,6 +224,7 @@ def compute_product_evaluation(db: Session, product_id: int) -> ProductEvaluatio
             freight_total_usd=base_freight_total * 1.15,
             insurance_total_usd=base_ins_total * 1.1,
             config=config,
+            sales_per_day=sales_per_day,
         ),
         _scenario_calc(
             kind="optimistic",
@@ -200,6 +236,7 @@ def compute_product_evaluation(db: Session, product_id: int) -> ProductEvaluatio
             freight_total_usd=base_freight_total * 0.95,
             insurance_total_usd=base_ins_total * 0.95,
             config=config,
+            sales_per_day=sales_per_day,
         ),
     ]
 
