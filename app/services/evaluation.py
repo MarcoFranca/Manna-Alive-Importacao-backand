@@ -18,8 +18,9 @@ from app.schemas.evaluation import (
     Metric,
     Pillar,
     ProductEvaluationResponse,
-    ScenarioResult,
+    ScenarioResult, ScoreSummary,
 )
+from app.services.scoring import compute_product_score_v2
 
 
 @dataclass(frozen=True)
@@ -397,11 +398,27 @@ def compute_product_evaluation(db: Session, product_id: int) -> ProductEvaluatio
     if not has_market_data:
         notes.append("Sem dados de mercado, a avaliação de demanda/competição fica inconclusiva.")
 
+    score_out: Optional[ScoreSummary] = None
+    try:
+        score_dict, _notes, reasons = compute_product_score_v2(db, product_id)
+        score_out = ScoreSummary(
+            total_score=score_dict["total_score"],
+            classification=score_dict["classification"],
+            demand_score=score_dict["demand_score"],
+            competition_score=score_dict["competition_score"],
+            margin_score=score_dict["margin_score"],
+            risk_score=score_dict["risk_score"],
+            reasons=reasons,
+        )
+    except Exception:
+        score_out = None
+
     return ProductEvaluationResponse(
         header=header,
         completeness=completeness,
         decision=decision,  # type: ignore[arg-type]
         decision_reason=decision_reason,
+        score=score_out,  # <-- NOVO
         pillars=pillars,
         scenarios=scenarios,
         blockers=blockers,

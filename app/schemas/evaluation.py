@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
 from typing import Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+
 from app.schemas.decision import ProductDecisionOut
 
 
@@ -96,6 +96,16 @@ class EvaluationHeader(BaseModel):
     updated_at: datetime
 
 
+class ScoreSummary(BaseModel):
+    total_score: int
+    classification: str
+    demand_score: int
+    competition_score: int
+    margin_score: int
+    risk_score: int
+    reasons: list[str] = Field(default_factory=list)
+
+
 class ProductEvaluationResponse(BaseModel):
     model_config = ConfigDict(from_attributes=False)
 
@@ -104,6 +114,9 @@ class ProductEvaluationResponse(BaseModel):
 
     decision: Decision
     decision_reason: str
+
+    # NOVO
+    score: Optional[ScoreSummary] = None
 
     pillars: list[Pillar] = Field(default_factory=list)
     scenarios: list[ScenarioResult] = Field(default_factory=list)
